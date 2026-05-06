@@ -1,0 +1,18 @@
+# 编译产物
+out/
+build/
+target/
+*.class
+
+# IDE
+.idea/workspace.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+*.iml
+
+# 敏感配置（密钥/密码）
+movie/conf/app.properties
+密钥.md
+
+# 日志
+*.log

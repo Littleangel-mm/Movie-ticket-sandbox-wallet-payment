@@ -1,0 +1,26 @@
+# 复制此文件为 app.properties 并填入实际值。
+
+# ---------- 数据库 ----------
+db.driver=com.mysql.cj.jdbc.Driver
+db.url=jdbc:mysql://YOUR_HOST:3306/movie_ticket_system?useSSL=false&serverTimezone=Asia/Shanghai
+db.user=root
+db.password=YOUR_DB_PASSWORD
+
+# ---------- 支付宝沙箱 ----------
+alipay.gateway=https://openapi-sandbox.dl.alipaydev.com/gateway.do
+alipay.appId=YOUR_APP_ID
+alipay.sellerId=YOUR_PID
+alipay.charset=UTF-8
+alipay.signType=RSA2
+alipay.notifyUrl=
+alipay.timeoutExpress=15m
+# 单行无空格的 PKCS8 私钥与 X.509 公钥
+alipay.appPrivateKey=YOUR_APP_PRIVATE_KEY_BASE64
+alipay.alipayPublicKey=YOUR_ALIPAY_PUBLIC_KEY_BASE64
+
+# ---------- MinIO ----------
+minio.endpoint=http://YOUR_HOST:9000
+minio.accessKey=YOUR_AK
+minio.secretKey=YOUR_SK
+minio.bucket=movies
+minio.presignSeconds=18000

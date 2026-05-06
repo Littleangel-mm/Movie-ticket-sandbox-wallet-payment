@@ -1,0 +1,65 @@
+-- ================================================================
+-- 电影售票与播放系统 数据库脚本
+-- 适用：从零部署 / 已有库执行迁移
+-- ================================================================
+
+CREATE DATABASE IF NOT EXISTS movie_ticket_system DEFAULT CHARSET utf8mb4;
+USE movie_ticket_system;
+
+-- 1. 影片信息表
+CREATE TABLE IF NOT EXISTS movie (
+    id                INT PRIMARY KEY AUTO_INCREMENT,
+    name              VARCHAR(100) NOT NULL,
+    hall              VARCHAR(50)  NOT NULL,
+    show_time         DATETIME     NOT NULL,
+    price             DECIMAL(6,2) NOT NULL,
+    total_seats       INT          NOT NULL,
+    available_seats   INT          NOT NULL,
+    image_url         VARCHAR(255),                 -- 海报外链 URL（旧字段，兼容保留）
+    video_object_key  VARCHAR(255) NULL,            -- MinIO 视频对象名，例 movies/12/inception.mp4
+    duration_seconds  INT          NULL,            -- 影片时长（秒）
+    poster_object_key VARCHAR(255) NULL             -- MinIO 海报对象名（可选，不填则用 image_url）
+);
+
+-- 2. 预约（占座）表
+CREATE TABLE IF NOT EXISTS reservation (
+    id            INT PRIMARY KEY AUTO_INCREMENT,
+    movie_id      INT NOT NULL,
+    customer_name VARCHAR(100) NOT NULL,
+    seat_number   VARCHAR(10)  NOT NULL,
+    reserve_time  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (movie_id) REFERENCES movie(id) ON DELETE CASCADE
+);
+
+-- 3. 支付（=票）表
+CREATE TABLE IF NOT EXISTS payment (
+    id             INT PRIMARY KEY AUTO_INCREMENT,
+    reservation_id INT NOT NULL,
+    method         VARCHAR(50) NOT NULL,            -- 微信 / 支付宝 / 银行卡
+    status         VARCHAR(20) NOT NULL,            -- 已支付 / 已取消 / 失败
+    pay_time       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    activated_at   DATETIME NULL,                   -- 首次点击播放的时间，NULL 表示未激活
+    expires_at     DATETIME NULL,                   -- activated_at + 5 小时
+    watch_status   VARCHAR(16) NOT NULL DEFAULT '未使用', -- 未使用 / 使用中 / 已过期
+    FOREIGN KEY (reservation_id) REFERENCES reservation(id) ON DELETE CASCADE
+);
+
+-- ================================================================
+-- 已有库的增量迁移脚本（幂等版本由 utils.DBMigration 自动跑）
+-- 如果要手动执行，先用 SHOW COLUMNS FROM xxx 检查避免重复
+-- ================================================================
+-- ALTER TABLE movie
+--   ADD COLUMN video_object_key  VARCHAR(255) NULL,
+--   ADD COLUMN duration_seconds  INT NULL,
+--   ADD COLUMN poster_object_key VARCHAR(255) NULL;
+--
+-- ALTER TABLE payment
+--   ADD COLUMN activated_at DATETIME NULL,
+--   ADD COLUMN expires_at   DATETIME NULL,
+--   ADD COLUMN watch_status VARCHAR(16) NOT NULL DEFAULT '未使用';
+
+-- 示例数据（可选）
+INSERT INTO movie (name, hall, show_time, price, total_seats, available_seats, image_url)
+VALUES
+('复仇者联盟4', '1号厅', '2025-07-01 19:00:00', 68.00, 100, 100, 'https://example.com/posters/avengers4.jpg'),
+('哪吒之魔童降世', '2号厅', '2025-07-01 20:30:00', 55.00, 80, 80, 'https://example.com/posters/nezha.jpg');
