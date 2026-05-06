@@ -2,12 +2,14 @@ package gui;
 
 import dao.MovieDAO;
 import model.Movie;
+import utils.MinioService;
 import utils.UIUtils;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.net.URL;
 import java.util.List;
 
@@ -23,11 +25,11 @@ public class MovieTablePanel extends JPanel {
 
         // 表头列名，最后一列显示图片
         model = new DefaultTableModel(new String[]{
-                "ID", "电影名", "影厅", "放映时间", "票价", "总座位", "剩余座位", "封面"
+                "ID", "电影名", "影厅", "放映时间", "票价", "总座位", "剩余座位", "视频", "封面"
         }, 0) {
             @Override
             public Class<?> getColumnClass(int column) {
-                return column == 7 ? ImageIcon.class : Object.class;
+                return column == 8 ? ImageIcon.class : Object.class;
             }
 
             @Override
@@ -39,7 +41,7 @@ public class MovieTablePanel extends JPanel {
         table = new JTable(model);
         UIUtils.styleTable(table);
         // 列宽优化
-        int[] widths = {60, 220, 90, 170, 80, 80, 90, 90};
+        int[] widths = {60, 200, 80, 160, 70, 70, 80, 70, 80};
         for (int i = 0; i < widths.length; i++) {
             table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         }
@@ -50,6 +52,7 @@ public class MovieTablePanel extends JPanel {
         // 顶部工具栏（卡片）
         JButton addBtn = UIUtils.primaryButton("+ 新增影票");
         JButton updateBtn = UIUtils.secondaryButton("编辑");
+        JButton uploadBtn = UIUtils.secondaryButton("上传视频");
         JButton deleteBtn = UIUtils.dangerButton("删除");
         JButton refreshBtn = UIUtils.ghostButton("刷新");
 
@@ -57,6 +60,7 @@ public class MovieTablePanel extends JPanel {
         toolBar.setOpaque(false);
         toolBar.add(addBtn);
         toolBar.add(updateBtn);
+        toolBar.add(uploadBtn);
         toolBar.add(deleteBtn);
         toolBar.add(refreshBtn);
 
@@ -122,6 +126,8 @@ public class MovieTablePanel extends JPanel {
             }
         });
 
+        uploadBtn.addActionListener(e -> uploadVideoForSelected(countLbl));
+
         refreshBtn.addActionListener(e -> reloadData(countLbl));
 
         reloadData(countLbl);
@@ -140,10 +146,90 @@ public class MovieTablePanel extends JPanel {
                     "￥" + m.getPrice(),
                     m.getTotalSeats(),
                     m.getAvailableSeats(),
+                    m.hasVideo() ? "已上传" : "未上传",
                     icon
             });
         }
         if (countLbl != null) countLbl.setText("共 " + movies.size() + " 条记录");
+    }
+
+    private void uploadVideoForSelected(JLabel countLbl) {
+        int row = table.getSelectedRow();
+        if (row == -1) { JOptionPane.showMessageDialog(this, "请先选中一部影片"); return; }
+        int movieId = (int) model.getValueAt(row, 0);
+        Movie movie = dao.getMovieById(movieId);
+        if (movie == null) { JOptionPane.showMessageDialog(this, "未找到该影片"); return; }
+
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("选择视频文件");
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("视频文件 (mp4, mkv, mov)", "mp4", "mkv", "mov"));
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        File file = fc.getSelectedFile();
+        long sizeMB = file.length() / 1024 / 1024;
+
+        Integer durationSec = askDurationSeconds(movie);
+        if (durationSec == null) return; // 取消
+
+        // 进度弹窗（不能取消，MinIO SDK 不提供进度回调）
+        JDialog progress = new JDialog(SwingUtilities.getWindowAncestor(this), "上传中", Dialog.ModalityType.APPLICATION_MODAL);
+        progress.setLayout(new BorderLayout());
+        JLabel msg = new JLabel("正在上传 " + file.getName() + "  (" + sizeMB + " MB)\u2026", SwingConstants.CENTER);
+        msg.setBorder(BorderFactory.createEmptyBorder(20, 28, 8, 28));
+        progress.add(msg, BorderLayout.CENTER);
+        JProgressBar pb = new JProgressBar();
+        pb.setIndeterminate(true);
+        pb.setBorder(BorderFactory.createEmptyBorder(0, 28, 20, 28));
+        progress.add(pb, BorderLayout.SOUTH);
+        progress.pack();
+        progress.setLocationRelativeTo(this);
+
+        SwingWorker<String, Void> worker = new SwingWorker<String, Void>() {
+            @Override protected String doInBackground() throws Exception {
+                String prefix = "movies/" + movieId;
+                return MinioService.upload(prefix, file, "video/" + extOf(file.getName()));
+            }
+            @Override protected void done() {
+                progress.dispose();
+                try {
+                    String key = get();
+                    boolean ok = dao.updateVideoInfo(movieId, key, durationSec, null);
+                    if (ok) {
+                        JOptionPane.showMessageDialog(MovieTablePanel.this, "上传成功\nObjectKey: " + key);
+                        reloadData(countLbl);
+                    } else {
+                        JOptionPane.showMessageDialog(MovieTablePanel.this, "上传成功但写库失败\nObjectKey: " + key, "警告", JOptionPane.WARNING_MESSAGE);
+                    }
+                } catch (Exception ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    JOptionPane.showMessageDialog(MovieTablePanel.this,
+                            "上传失败：" + cause.getMessage(),
+                            "错误", JOptionPane.ERROR_MESSAGE);
+                    cause.printStackTrace();
+                }
+            }
+        };
+        worker.execute();
+        progress.setVisible(true);
+    }
+
+    private Integer askDurationSeconds(Movie movie) {
+        String preset = movie.getDurationSeconds() != null ? String.valueOf(movie.getDurationSeconds()) : "";
+        String input = JOptionPane.showInputDialog(this,
+                "请输入影片时长（秒），可留空：",
+                preset);
+        if (input == null) return null; // 取消
+        input = input.trim();
+        if (input.isEmpty()) return 0;
+        try { return Integer.parseInt(input); }
+        catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "请输入整数秒数");
+            return askDurationSeconds(movie);
+        }
+    }
+
+    private static String extOf(String name) {
+        int i = name.lastIndexOf('.');
+        return i < 0 ? "mp4" : name.substring(i + 1).toLowerCase();
     }
 
     private ImageIcon getImageIcon(String urlStr) {

@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="minio">
+    <CLASSES>
+      <root url="file://$PROJECT_DIR$/movie/lib/minio" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+    <jarDirectory url="file://$PROJECT_DIR$/movie/lib/minio" recursive="false" />
+  </library>
+</component>
