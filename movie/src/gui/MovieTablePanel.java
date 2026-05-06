@@ -6,62 +6,26 @@ import utils.MinioService;
 import utils.UIUtils;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.io.File;
-import java.net.URL;
 import java.util.List;
 
-public class MovieTablePanel extends JPanel {
-    private JTable table;
-    private DefaultTableModel model;
+public class MovieTablePanel extends JPanel implements MovieAdminCard.Actions {
     private final MovieDAO dao = new MovieDAO();
+    private JPanel grid;
+    private JLabel countLbl;
 
     public MovieTablePanel() {
         setLayout(new BorderLayout());
         setBackground(UIUtils.BG);
-        setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-
-        // 表头列名，最后一列显示图片
-        model = new DefaultTableModel(new String[]{
-                "ID", "电影名", "影厅", "放映时间", "票价", "总座位", "剩余座位", "视频", "封面"
-        }, 0) {
-            @Override
-            public Class<?> getColumnClass(int column) {
-                return column == 8 ? ImageIcon.class : Object.class;
-            }
-
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-
-        table = new JTable(model);
-        UIUtils.styleTable(table);
-        // 列宽优化
-        int[] widths = {60, 200, 80, 160, 70, 70, 80, 70, 80};
-        for (int i = 0; i < widths.length; i++) {
-            table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
-        }
-        JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.getViewport().setBackground(UIUtils.CARD);
 
         // 顶部工具栏（卡片）
-        JButton addBtn = UIUtils.primaryButton("+ 新增影票");
-        JButton updateBtn = UIUtils.secondaryButton("编辑");
-        JButton uploadBtn = UIUtils.secondaryButton("上传视频");
-        JButton deleteBtn = UIUtils.dangerButton("删除");
+        JButton addBtn     = UIUtils.primaryButton("+ 新增影票");
         JButton refreshBtn = UIUtils.ghostButton("刷新");
 
         JPanel toolBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         toolBar.setOpaque(false);
         toolBar.add(addBtn);
-        toolBar.add(updateBtn);
-        toolBar.add(uploadBtn);
-        toolBar.add(deleteBtn);
         toolBar.add(refreshBtn);
 
         JPanel toolCard = new JPanel(new BorderLayout());
@@ -71,95 +35,76 @@ public class MovieTablePanel extends JPanel {
                 BorderFactory.createEmptyBorder(12, 16, 12, 16)));
         toolCard.add(toolBar, BorderLayout.WEST);
 
-        JLabel countLbl = new JLabel();
+        countLbl = new JLabel();
         countLbl.setForeground(UIUtils.TEXT_MUTED);
         countLbl.setFont(UIUtils.FONT_SMALL);
         toolCard.add(countLbl, BorderLayout.EAST);
 
-        // 表格卡片
-        JPanel tableCard = new JPanel(new BorderLayout());
-        tableCard.setBackground(UIUtils.CARD);
-        tableCard.setBorder(new UIUtils.RoundedLineBorder(UIUtils.BORDER, 12, 1));
-        tableCard.add(scrollPane, BorderLayout.CENTER);
+        // 海报网格
+        grid = new JPanel(new GridLayout(0, 4, 16, 16));
+        grid.setBackground(UIUtils.BG);
+        grid.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        JScrollPane scrollPane = new JScrollPane(grid);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.getViewport().setBackground(UIUtils.BG);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(20);
 
         JPanel center = new JPanel(new BorderLayout(0, 12));
         center.setOpaque(false);
         center.add(toolCard, BorderLayout.NORTH);
-        center.add(tableCard, BorderLayout.CENTER);
+        center.add(scrollPane, BorderLayout.CENTER);
         add(center, BorderLayout.CENTER);
 
-        // 按钮监听
         addBtn.addActionListener(e -> {
             MovieFormDialog dialog = new MovieFormDialog(null);
             dialog.setVisible(true);
-            reloadData(countLbl);
+            reloadData();
         });
+        refreshBtn.addActionListener(e -> reloadData());
 
-        updateBtn.addActionListener(e -> {
-            int row = table.getSelectedRow();
-            if (row == -1) {
-                JOptionPane.showMessageDialog(this, "请选择一行进行修改！");
-                return;
-            }
-            int id = (int) model.getValueAt(row, 0);
-            Movie movie = dao.getMovieById(id);
-            if (movie == null) {
-                JOptionPane.showMessageDialog(this, "未找到该电影信息！");
-                return;
-            }
-            MovieFormDialog dialog = new MovieFormDialog(movie);
-            dialog.setVisible(true);
-            reloadData(countLbl);
-        });
-
-        deleteBtn.addActionListener(e -> {
-            int row = table.getSelectedRow();
-            if (row == -1) {
-                JOptionPane.showMessageDialog(this, "请选择一行进行删除！");
-                return;
-            }
-            int confirm = JOptionPane.showConfirmDialog(this, "确认删除该影票吗？", "确认删除", JOptionPane.YES_NO_OPTION);
-            if (confirm == JOptionPane.YES_OPTION) {
-                int id = (int) model.getValueAt(row, 0);
-                dao.deleteMovie(id);
-                reloadData(countLbl);
-            }
-        });
-
-        uploadBtn.addActionListener(e -> uploadVideoForSelected(countLbl));
-
-        refreshBtn.addActionListener(e -> reloadData(countLbl));
-
-        reloadData(countLbl);
+        reloadData();
     }
 
-    private void reloadData(JLabel countLbl) {
-        model.setRowCount(0);
+    private void reloadData() {
+        grid.removeAll();
         List<Movie> movies = dao.getAllMovies();
         for (Movie m : movies) {
-            ImageIcon icon = getImageIcon(m.getImageUrl());
-            model.addRow(new Object[]{
-                    m.getId(),
-                    m.getName(),
-                    m.getHall(),
-                    m.getShowTime(),
-                    "￥" + m.getPrice(),
-                    m.getTotalSeats(),
-                    m.getAvailableSeats(),
-                    m.hasVideo() ? "已上传" : "未上传",
-                    icon
-            });
+            grid.add(new MovieAdminCard(m, this));
         }
-        if (countLbl != null) countLbl.setText("共 " + movies.size() + " 条记录");
+        // 末行不足 4 列时补占位避免拉伸
+        int filler = (4 - movies.size() % 4) % 4;
+        for (int i = 0; i < filler; i++) {
+            JPanel p = new JPanel();
+            p.setOpaque(false);
+            grid.add(p);
+        }
+        grid.revalidate();
+        grid.repaint();
+        countLbl.setText("共 " + movies.size() + " 部影片");
     }
 
-    private void uploadVideoForSelected(JLabel countLbl) {
-        int row = table.getSelectedRow();
-        if (row == -1) { JOptionPane.showMessageDialog(this, "请先选中一部影片"); return; }
-        int movieId = (int) model.getValueAt(row, 0);
-        Movie movie = dao.getMovieById(movieId);
-        if (movie == null) { JOptionPane.showMessageDialog(this, "未找到该影片"); return; }
+    /* ============== MovieAdminCard.Actions 实现 ============== */
 
+    @Override
+    public void onEdit(Movie m) {
+        MovieFormDialog dialog = new MovieFormDialog(m);
+        dialog.setVisible(true);
+        reloadData();
+    }
+
+    @Override
+    public void onDelete(Movie m) {
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "确认删除影片 #" + m.getId() + " " + m.getName() + " 吗？",
+                "确认删除", JOptionPane.YES_NO_OPTION);
+        if (confirm == JOptionPane.YES_OPTION) {
+            dao.deleteMovie(m.getId());
+            reloadData();
+        }
+    }
+
+    @Override
+    public void onUpload(Movie movie) {
         JFileChooser fc = new JFileChooser();
         fc.setDialogTitle("选择视频文件");
         fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("视频文件 (mp4, mkv, mov)", "mp4", "mkv", "mov"));
@@ -185,17 +130,17 @@ public class MovieTablePanel extends JPanel {
 
         SwingWorker<String, Void> worker = new SwingWorker<String, Void>() {
             @Override protected String doInBackground() throws Exception {
-                String prefix = "movies/" + movieId;
+                String prefix = "movies/" + movie.getId();
                 return MinioService.upload(prefix, file, "video/" + extOf(file.getName()));
             }
             @Override protected void done() {
                 progress.dispose();
                 try {
                     String key = get();
-                    boolean ok = dao.updateVideoInfo(movieId, key, durationSec, null);
+                    boolean ok = dao.updateVideoInfo(movie.getId(), key, durationSec, null);
                     if (ok) {
                         JOptionPane.showMessageDialog(MovieTablePanel.this, "上传成功\nObjectKey: " + key);
-                        reloadData(countLbl);
+                        reloadData();
                     } else {
                         JOptionPane.showMessageDialog(MovieTablePanel.this, "上传成功但写库失败\nObjectKey: " + key, "警告", JOptionPane.WARNING_MESSAGE);
                     }
@@ -232,14 +177,4 @@ public class MovieTablePanel extends JPanel {
         return i < 0 ? "mp4" : name.substring(i + 1).toLowerCase();
     }
 
-    private ImageIcon getImageIcon(String urlStr) {
-        try {
-            URL url = new URL(urlStr);
-            ImageIcon original = new ImageIcon(url);
-            Image scaled = original.getImage().getScaledInstance(46, 60, Image.SCALE_SMOOTH);
-            return new ImageIcon(scaled);
-        } catch (Exception e) {
-            return new ImageIcon(new BufferedImage(46, 60, BufferedImage.TYPE_INT_ARGB));
-        }
-    }
 }

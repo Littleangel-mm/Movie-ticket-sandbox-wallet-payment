@@ -5,22 +5,19 @@ import model.Movie;
 import utils.UIUtils;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
 public class ClientMainFrame extends JFrame {
-    private JTable movieTable;
-    private DefaultTableModel tableModel;
-    private JButton btnReserve;
     private JButton btnMyReservation;
     private JPanel mainPanel;
     private JPanel moviePanel;
+    private JPanel posterGrid;
     private MyReservationPanel myReservationPanel;
     private String currentCustomerName = "";
     private int currentPage = 1;
-    private int pageSize = 5;
+    private int pageSize = 8;
     private int totalPages = 1;
     private JButton btnPrev;
     private JButton btnNext;
@@ -48,34 +45,10 @@ public class ClientMainFrame extends JFrame {
         moviePanel = new JPanel(new BorderLayout(0, 12));
         moviePanel.setOpaque(false);
 
-        tableModel = new DefaultTableModel(new String[]{
-                "ID", "电影名", "影厅", "放映时间", "票价", "总座位", "剩余座位", "封面"
-        }, 0) {
-            @Override
-            public Class<?> getColumnClass(int column) {
-                return column == 7 ? ImageIcon.class : Object.class;
-            }
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        movieTable = new JTable(tableModel);
-        UIUtils.styleTable(movieTable);
-        int[] widths = {60, 220, 90, 170, 80, 80, 90, 90};
-        for (int i = 0; i < widths.length; i++) {
-            movieTable.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
-        }
-        JScrollPane scrollPane = new JScrollPane(movieTable);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.getViewport().setBackground(UIUtils.CARD);
-
         // 顶部操作卡片
-        btnReserve = UIUtils.primaryButton("预约选座");
         btnMyReservation = UIUtils.secondaryButton("我的预约");
         JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         actionBar.setOpaque(false);
-        actionBar.add(btnReserve);
         actionBar.add(btnMyReservation);
 
         JPanel actionCard = new JPanel(new BorderLayout());
@@ -84,18 +57,21 @@ public class ClientMainFrame extends JFrame {
                 new UIUtils.RoundedLineBorder(UIUtils.BORDER, 12, 1),
                 BorderFactory.createEmptyBorder(12, 16, 12, 16)));
         actionCard.add(actionBar, BorderLayout.WEST);
-        JLabel hint = new JLabel("选中一部电影后点击“预约选座”");
+        JLabel hint = new JLabel("点击海报查看详情并预约");
         hint.setForeground(UIUtils.TEXT_MUTED);
         hint.setFont(UIUtils.FONT_SMALL);
         actionCard.add(hint, BorderLayout.EAST);
         moviePanel.add(actionCard, BorderLayout.NORTH);
 
-        // 表格卡片
-        JPanel tableCard = new JPanel(new BorderLayout());
-        tableCard.setBackground(UIUtils.CARD);
-        tableCard.setBorder(new UIUtils.RoundedLineBorder(UIUtils.BORDER, 12, 1));
-        tableCard.add(scrollPane, BorderLayout.CENTER);
-        moviePanel.add(tableCard, BorderLayout.CENTER);
+        // 海报网格（可滚动）
+        posterGrid = new JPanel(new GridLayout(0, 4, 16, 16));
+        posterGrid.setBackground(UIUtils.BG);
+        posterGrid.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        JScrollPane scrollPane = new JScrollPane(posterGrid);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.getViewport().setBackground(UIUtils.BG);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(20);
+        moviePanel.add(scrollPane, BorderLayout.CENTER);
 
         // 底部分页卡片
         btnPrev = UIUtils.secondaryButton("上一页");
@@ -125,62 +101,8 @@ public class ClientMainFrame extends JFrame {
         // 加载电影数据
         reloadAllMovies();
 
-        // 预约按钮事件
-        btnReserve.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                int row = movieTable.getSelectedRow();
-                if (row == -1) {
-                    JOptionPane.showMessageDialog(ClientMainFrame.this, "请先选择一部电影！");
-                    return;
-                }
-                int movieId = (int) tableModel.getValueAt(row, 0);
-                MovieDAO movieDAO = new MovieDAO();
-                Movie movie = movieDAO.getMovieById(movieId);
-                if (movie == null) {
-                    JOptionPane.showMessageDialog(ClientMainFrame.this, "未找到该电影信息！");
-                    return;
-                }
-                // 打开预约对话框（不再传递客户名）
-                ReservationDialog dialog = new ReservationDialog(ClientMainFrame.this, movie);
-                dialog.setVisible(true);
-                loadMovies(); // 预约后刷新电影座位
-            }
-        });
-
-        // 我的预约按钮事件
-        btnMyReservation.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                if (!ClientSession.isLoggedIn()) {
-                    String name = JOptionPane.showInputDialog(ClientMainFrame.this,
-                            "请输入您的姓名以查看预约记录：", "验证身份", JOptionPane.QUESTION_MESSAGE);
-                    if (name == null || name.trim().isEmpty()) return;
-                    ClientSession.customerName = name.trim();
-                    refreshHeader();
-                }
-                currentCustomerName = ClientSession.customerName;
-                if (myReservationPanel == null || !currentCustomerName.equals(myReservationPanel.customerName)) {
-                    if (myReservationPanel != null) mainPanel.remove(myReservationPanel);
-                    myReservationPanel = new MyReservationPanel(ClientMainFrame.this, currentCustomerName);
-                    mainPanel.add(myReservationPanel, "myreservation");
-                } else {
-                    myReservationPanel.reloadData();
-                }
-                CardLayout cl = (CardLayout) mainPanel.getLayout();
-                cl.show(mainPanel, "myreservation");
-            }
-        });
-
-        // 双击表格返回电影浏览
-        movieTable.addMouseListener(new java.awt.event.MouseAdapter() {
-            public void mouseClicked(java.awt.event.MouseEvent evt) {
-                if (evt.getClickCount() == 2) {
-                    CardLayout cl = (CardLayout) mainPanel.getLayout();
-                    cl.show(mainPanel, "movie");
-                }
-            }
-        });
+        // 我的预约按钮
+        btnMyReservation.addActionListener(e -> openMyReservation());
 
         btnPrev.addActionListener(e -> {
             if (currentPage > 1) {
@@ -210,41 +132,62 @@ public class ClientMainFrame extends JFrame {
         cl.show(mainPanel, "movie");
     }
 
+    /** 内嵌切换到电影详情页，不弹新窗口。 */
+    public void showDetail(Movie movie) {
+        // 每次则重建（可选优化：缓存）
+        for (Component c : mainPanel.getComponents()) {
+            if (c instanceof MovieDetailPanel) { mainPanel.remove(c); break; }
+        }
+        MovieDetailPanel detail = new MovieDetailPanel(this, movie);
+        mainPanel.add(detail, "detail");
+        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "detail");
+    }
+
+    /** 从详情页或其他处跳到「我的预约」。 */
+    public void openMyReservation() {
+        if (!ClientSession.isLoggedIn()) {
+            String name = JOptionPane.showInputDialog(this,
+                    "请输入您的姓名以查看预约记录：", "验证身份", JOptionPane.QUESTION_MESSAGE);
+            if (name == null || name.trim().isEmpty()) return;
+            ClientSession.customerName = name.trim();
+            refreshHeader();
+        }
+        currentCustomerName = ClientSession.customerName;
+        if (myReservationPanel == null || !currentCustomerName.equals(myReservationPanel.customerName)) {
+            if (myReservationPanel != null) mainPanel.remove(myReservationPanel);
+            myReservationPanel = new MyReservationPanel(this, currentCustomerName);
+            mainPanel.add(myReservationPanel, "myreservation");
+        } else {
+            myReservationPanel.reloadData();
+        }
+        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "myreservation");
+    }
+
     public void loadMovies() {
         // 每次都重新从数据库加载 allMovies，确保剩余座位刷新
         MovieDAO dao = new MovieDAO();
         allMovies = dao.getAllMovies();
-        tableModel.setRowCount(0);
+        totalPages = Math.max(1, (int) Math.ceil(allMovies.size() / (double) pageSize));
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        posterGrid.removeAll();
         int start = (currentPage - 1) * pageSize;
         int end = Math.min(start + pageSize, allMovies.size());
         for (int i = start; i < end; i++) {
-            Movie m = allMovies.get(i);
-            ImageIcon icon = getImageIcon(m.getImageUrl());
-            tableModel.addRow(new Object[]{
-                    m.getId(),
-                    m.getName(),
-                    m.getHall(),
-                    m.getShowTime(),
-                    "￥" + m.getPrice(),
-                    m.getTotalSeats(),
-                    m.getAvailableSeats(),
-                    icon
-            });
+            posterGrid.add(new MoviePosterCard(allMovies.get(i), this));
         }
+        // 不足 pageSize 时补透明占位，避免顶对齐
+        for (int i = end - start; i < pageSize; i++) {
+            JPanel filler = new JPanel();
+            filler.setOpaque(false);
+            posterGrid.add(filler);
+        }
+        posterGrid.revalidate();
+        posterGrid.repaint();
+
         lblPageInfo.setText("第 " + currentPage + " / " + totalPages + " 页");
         btnPrev.setEnabled(currentPage > 1);
         btnNext.setEnabled(currentPage < totalPages);
-    }
-
-    private ImageIcon getImageIcon(String urlStr) {
-        try {
-            java.net.URL url = new java.net.URL(urlStr);
-            ImageIcon original = new ImageIcon(url);
-            Image scaled = original.getImage().getScaledInstance(46, 60, Image.SCALE_SMOOTH);
-            return new ImageIcon(scaled);
-        } catch (Exception e) {
-            return new ImageIcon(new java.awt.image.BufferedImage(46, 60, java.awt.image.BufferedImage.TYPE_INT_ARGB));
-        }
     }
 
     private JPanel headerPanel;

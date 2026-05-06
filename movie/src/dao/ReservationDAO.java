@@ -12,13 +12,19 @@ public class ReservationDAO {
     public boolean addReservation(Reservation r) {
         String sql = "INSERT INTO reservation (movie_id, customer_name, seat_number, reserve_time) VALUES (?, ?, ?, ?)";
         try (Connection conn = DBUtils.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)) {
             stmt.setInt(1, r.getMovieId());
             stmt.setString(2, r.getCustomerName());
             stmt.setString(3, r.getSeatNumber());
             stmt.setTimestamp(4, r.getReserveTime() == null ? new Timestamp(System.currentTimeMillis()) : new Timestamp(r.getReserveTime().getTime()));
             int rows = stmt.executeUpdate();
-            return rows > 0;
+            if (rows > 0) {
+                try (ResultSet keys = stmt.getGeneratedKeys()) {
+                    if (keys.next()) r.setId(keys.getInt(1));
+                }
+                return true;
+            }
+            return false;
         } catch (SQLException e) {
             e.printStackTrace();
             return false;

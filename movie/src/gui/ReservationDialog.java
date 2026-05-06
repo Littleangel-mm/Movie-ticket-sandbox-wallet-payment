@@ -19,6 +19,9 @@ public class ReservationDialog extends JDialog {
     private JButton btnReserve;
     private JButton btnCancel;
 
+    /** 预约成功后由调用者读取，用于串联后续支付流程。-1 表示未成功。 */
+    public int newReservationId = -1;
+
     public ReservationDialog(JFrame parent, Movie movie) {
         super(parent, "预约选座", true);
         this.movie = movie;
@@ -115,6 +118,7 @@ public class ReservationDialog extends JDialog {
         reservation.setReserveTime(new java.util.Date());
         boolean success = reservationDAO.addReservation(reservation);
         if (success) {
+            this.newReservationId = reservation.getId();
             // 预约成功后立即减少剩余座位
             new MovieDAO().decreaseAvailableSeats(movie.getId());
             // 记住客户姓名，避免后续重复输入
