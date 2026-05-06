@@ -6,6 +6,7 @@ import dao.PaymentDAO;
 import model.Movie;
 import model.Reservation;
 import model.Payment;
+import utils.MinioService;
 import utils.UIUtils;
 
 import javax.swing.*;
@@ -22,6 +23,7 @@ public class MyReservationPanel extends JPanel {
     private DefaultTableModel tableModel;
     private JButton btnCancel;
     private JButton btnPay;
+    private JButton btnWatch;
     private JButton btnBack;
     private ReservationDAO reservationDAO = new ReservationDAO();
     private MovieDAO movieDAO = new MovieDAO();
@@ -50,7 +52,7 @@ public class MyReservationPanel extends JPanel {
         infoBox.add(sub);
 
         tableModel = new DefaultTableModel(new String[]{
-                "预约ID", "电影名", "影厅", "放映时间", "座位号", "票价", "预约时间", "支付状态"
+                "预约ID", "电影名", "影厅", "放映时间", "座位号", "票价", "预约时间", "支付状态", "观看"
         }, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -65,6 +67,7 @@ public class MyReservationPanel extends JPanel {
         scrollPane.getViewport().setBackground(UIUtils.CARD);
 
         btnPay = UIUtils.primaryButton("支付");
+        btnWatch = UIUtils.primaryButton("观看");
         btnCancel = UIUtils.dangerButton("取消预约");
         btnBack = UIUtils.ghostButton("返回");
 
@@ -94,6 +97,7 @@ public class MyReservationPanel extends JPanel {
                 BorderFactory.createEmptyBorder(10, 16, 10, 16)));
         btnPanel.add(btnCancel);
         btnPanel.add(btnPay);
+        btnPanel.add(btnWatch);
 
         add(topCard, BorderLayout.NORTH);
         add(tableCard, BorderLayout.CENTER);
@@ -150,6 +154,8 @@ public class MyReservationPanel extends JPanel {
             }
         });
 
+        btnWatch.addActionListener(e -> watchSelected());
+
         btnBack.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -158,6 +164,70 @@ public class MyReservationPanel extends JPanel {
         });
 
         reloadData();
+    }
+
+    /** 计算「观看」列的显示文本。 */
+    private String computeWatchLabel(Payment payment, Movie movie) {
+        if (payment == null || !"已支付".equals(payment.getStatus())) return "未支付";
+        if (movie == null || !movie.hasVideo()) return "暂无视频";
+        if (payment.getActivatedAt() == null) return "未使用";
+        long remain = payment.remainingMillis();
+        if (remain <= 0) return "已过期";
+        long h = remain / 3600_000;
+        long m = (remain % 3600_000) / 60_000;
+        return String.format("使用中 剩 %02d:%02d", h, m);
+    }
+
+    private void watchSelected() {
+        int row = table.getSelectedRow();
+        if (row == -1) { JOptionPane.showMessageDialog(this, "请先选中一行预约"); return; }
+        int reservationId = (int) tableModel.getValueAt(row, 0);
+
+        Reservation r = reservationDAO.getReservationById(reservationId);
+        if (r == null) { JOptionPane.showMessageDialog(this, "预约不存在"); return; }
+
+        Payment payment = paymentDAO.getPaymentByReservationId(reservationId);
+        if (payment == null || !"已支付".equals(payment.getStatus())) {
+            JOptionPane.showMessageDialog(this, "未支付，请先完成支付"); return;
+        }
+
+        Movie movie = movieDAO.getMovieById(r.getMovieId());
+        if (movie == null || !movie.hasVideo()) {
+            JOptionPane.showMessageDialog(this, "该影片暂无可播放的视频，请联系管理员"); return;
+        }
+
+        // 过期检查
+        if (payment.getActivatedAt() != null && payment.remainingMillis() <= 0) {
+            JOptionPane.showMessageDialog(this, "此票已超过 5 小时观看期，不能再播放");
+            paymentDAO.markExpiredTickets();
+            reloadData();
+            return;
+        }
+
+        // 首次观看提示激活
+        if (payment.getActivatedAt() == null) {
+            int ans = JOptionPane.showConfirmDialog(this,
+                    "首次观看将激活影票，后续 5 小时内可重复观看，超时后不可再看。\n确认开始观看？",
+                    "激活影票", JOptionPane.YES_NO_OPTION);
+            if (ans != JOptionPane.YES_OPTION) return;
+            if (!paymentDAO.activateTicket(payment.getId())) {
+                JOptionPane.showMessageDialog(this, "激活失败，请重试");
+                return;
+            }
+        }
+
+        // 获取预签名 URL 并播放
+        try {
+            String url = MinioService.presignedGetUrl(movie.getVideoObjectKey());
+            PlayerDialog dlg = new PlayerDialog(SwingUtilities.getWindowAncestor(this),
+                    "正在观看：" + movie.getName(), url);
+            dlg.setVisible(true);
+            reloadData();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(this, "生成播放地址失败：" + ex.getMessage(),
+                    "错误", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     public void reloadData() {
@@ -171,6 +241,7 @@ public class MyReservationPanel extends JPanel {
             String price = movie != null ? ("￥" + movie.getPrice()) : "";
             Payment payment = paymentDAO.getPaymentByReservationId(r.getId());
             String payStatus = payment == null ? "未支付" : payment.getStatus();
+            String watchCol = computeWatchLabel(payment, movie);
             tableModel.addRow(new Object[]{
                     r.getId(),
                     movieName,
@@ -179,7 +250,8 @@ public class MyReservationPanel extends JPanel {
                     r.getSeatNumber(),
                     price,
                     r.getReserveTime(),
-                    payStatus
+                    payStatus,
+                    watchCol
             });
         }
     }
