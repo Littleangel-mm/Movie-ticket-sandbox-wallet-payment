@@ -1,6 +1,5 @@
 package gui;
 
-import dao.MovieDAO;
 import dao.PaymentDAO;
 import model.Movie;
 import model.Payment;
@@ -73,12 +72,13 @@ public class MovieDetailPanel extends JPanel {
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         btns.setOpaque(false);
         btns.setAlignmentX(LEFT_ALIGNMENT);
-        JButton btnWatch = UIUtils.primaryButton(
-                movie.getAvailableSeats() > 0 ? "立即观看" : "已售罄");
-        btnWatch.setEnabled(movie.getAvailableSeats() > 0);
-        JButton btnMy = UIUtils.secondaryButton("我的预约");
+        boolean hasSeats = movie.getAvailableSeats() > 0;
+        JButton btnWatch = UIUtils.primaryButton(hasSeats ? "立即观看" : "已售罄");
+        btnWatch.setEnabled(hasSeats);
+        JButton btnReserve = UIUtils.secondaryButton("立即预约");
+        btnReserve.setEnabled(hasSeats);
         btns.add(btnWatch);
-        btns.add(btnMy);
+        btns.add(btnReserve);
         right.add(btns);
 
         content.add(right, BorderLayout.CENTER);
@@ -86,12 +86,17 @@ public class MovieDetailPanel extends JPanel {
 
         // 事件
         btnBack.addActionListener(e -> parent.showMoviePanel());
+
+        // 「立即观看」：预约（内嵌） → 支付 → 自动激活 → 直接播放，一条龙
         btnWatch.addActionListener(e -> startWatchFlow(parent, movie));
-        btnMy.addActionListener(e -> parent.openMyReservation());
+
+        // 「立即预约」：仅内嵌打开预约面板，预约完成跳「查看预约」
+        btnReserve.addActionListener(e ->
+                parent.showReservation(movie, () -> parent.openMyReservation()));
     }
 
     /**
-     * 一键观看流程：选座 → 支付 → 激活 → 播放。每一步用户取消都会中断。
+     * 一键观看流程：内嵌预约 → 支付 → 激活 → 播放。预约/支付任何一步取消都会中断。
      */
     private void startWatchFlow(ClientMainFrame parent, Movie movie) {
         if (!movie.hasVideo()) {
@@ -99,45 +104,53 @@ public class MovieDetailPanel extends JPanel {
                     "该影片暂未上线视频，请管理员上传后再来", "暂无视频", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        // 内嵌预约，成功回调里继续支付 + 激活 + 播放
+        parent.showReservation(movie, () -> continueAfterReserve(parent, movie));
+    }
 
-        // 1. 预约选座
-        ReservationDialog rdlg = new ReservationDialog(parent, movie);
-        rdlg.setVisible(true);
-        int rid = rdlg.newReservationId;
-        if (rid <= 0) return; // 用户取消或失败
-
-        parent.loadMovies(); // 刷新剩余座位
-
-        // 2. 支付
-        PaymentDialog pdlg = new PaymentDialog(parent, rid, null);
-        pdlg.setVisible(true);
-
-        // 3. 校验是否真的已支付
-        PaymentDAO paymentDAO = new PaymentDAO();
-        Payment payment = paymentDAO.getPaymentByReservationId(rid);
-        if (payment == null || !"已支付".equals(payment.getStatus())) {
-            // 未支付或被取消，跳到「我的预约」让用户后续处理
+    private void continueAfterReserve(ClientMainFrame parent, Movie movie) {
+        // 拿到刚刚生成的预约 id（按客户姓名+座位倒序找最新一条比较稳）。
+        // 这里简单做法：取该客户最近一条 reservation。
+        int rid = findLatestReservationId(movie);
+        if (rid <= 0) {
             parent.openMyReservation();
             return;
         }
 
-        // 4. 激活票（首次必激活）
+        // 支付（暂保留对话框，支付链路依赖支付宝沙箱回调，不适合内嵌）
+        PaymentDialog pdlg = new PaymentDialog(parent, rid, null);
+        pdlg.setVisible(true);
+
+        PaymentDAO paymentDAO = new PaymentDAO();
+        Payment payment = paymentDAO.getPaymentByReservationId(rid);
+        if (payment == null || !"已支付".equals(payment.getStatus())) {
+            parent.openMyReservation();
+            return;
+        }
         if (payment.getActivatedAt() == null) {
             paymentDAO.activateTicket(payment.getId());
         }
-
-        // 5. 直接打开播放器
         try {
             String url = MinioService.presignedGetUrl(movie.getVideoObjectKey());
-            PlayerDialog dlg = new PlayerDialog(SwingUtilities.getWindowAncestor(this),
+            PlayerDialog dlg = new PlayerDialog(SwingUtilities.getWindowAncestor(parent),
                     "正在观看：" + movie.getName(), url);
             dlg.setVisible(true);
             parent.showMoviePanel();
         } catch (Exception ex) {
             ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "生成播放地址失败：" + ex.getMessage(),
+            JOptionPane.showMessageDialog(parent, "生成播放地址失败：" + ex.getMessage(),
                     "错误", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    private int findLatestReservationId(Movie movie) {
+        if (!ClientSession.isLoggedIn()) return -1;
+        java.util.List<model.Reservation> list =
+                new dao.ReservationDAO().getReservationsByCustomer(ClientSession.customerName);
+        for (model.Reservation r : list) {
+            if (r.getMovieId() == movie.getId()) return r.getId();
+        }
+        return -1;
     }
 
     private JComponent infoRow(String label, String value) {

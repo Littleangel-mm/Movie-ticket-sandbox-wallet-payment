@@ -46,7 +46,7 @@ public class ClientMainFrame extends JFrame {
         moviePanel.setOpaque(false);
 
         // 顶部操作卡片
-        btnMyReservation = UIUtils.secondaryButton("我的预约");
+        btnMyReservation = UIUtils.secondaryButton("查看预约");
         JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         actionBar.setOpaque(false);
         actionBar.add(btnMyReservation);
@@ -130,6 +130,16 @@ public class ClientMainFrame extends JFrame {
     public void showMoviePanel() {
         CardLayout cl = (CardLayout) mainPanel.getLayout();
         cl.show(mainPanel, "movie");
+    }
+
+    /** 内嵌切换到「预约选座」面板。onSuccess 为预约成功后的回调（默认跳「查看预约」）。 */
+    public void showReservation(Movie movie, Runnable onSuccess) {
+        for (Component c : mainPanel.getComponents()) {
+            if (c instanceof ReservationPanel) { mainPanel.remove(c); break; }
+        }
+        ReservationPanel panel = new ReservationPanel(this, movie, onSuccess);
+        mainPanel.add(panel, "reservation");
+        ((CardLayout) mainPanel.getLayout()).show(mainPanel, "reservation");
     }
 
     /** 内嵌切换到电影详情页，不弹新窗口。 */
